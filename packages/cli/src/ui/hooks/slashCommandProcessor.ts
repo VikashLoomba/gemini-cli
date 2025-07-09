@@ -1225,6 +1225,9 @@ export const useSlashCommandProcessor = (
     ],
   );
 
+  // Track MCP prompt changes to trigger re-rendering of commands
+  const [mcpPromptVersion, setMcpPromptVersion] = useState(0);
+
   // Create slash commands from MCP prompts
   const mcpPromptCommands = useMemo(() => {
     const prompts = getMCPPrompts();
@@ -1304,9 +1307,6 @@ export const useSlashCommandProcessor = (
       };
     });
   }, [mcpPromptVersion]);
-
-  // Track MCP prompt changes to trigger re-rendering of commands
-  const [mcpPromptVersion, setMcpPromptVersion] = useState(0);
 
   // Listen for MCP server status changes to update prompt commands
   useEffect(() => {
