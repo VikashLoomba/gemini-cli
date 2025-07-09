@@ -287,25 +287,20 @@ async function connectAndDiscover(
     });
   }
 
-  try {
-    const mcpCallableTool = mcpToTool(mcpClient);
-    const tool = await mcpCallableTool.tool();
+  // Check server capabilities before attempting to discover tools
+  const capabilities = mcpClient.getServerCapabilities();
+  
+  // Discover tools if the server supports them
+  if (capabilities?.tools) {
+    try {
+      const mcpCallableTool = mcpToTool(mcpClient);
+      const tool = await mcpCallableTool.tool();
 
-    if (!tool || !Array.isArray(tool.functionDeclarations)) {
-      console.error(
-        `MCP server '${mcpServerName}' did not return valid tool function declarations. Skipping.`,
-      );
-      if (
-        transport instanceof StdioClientTransport ||
-        transport instanceof SSEClientTransport ||
-        transport instanceof StreamableHTTPClientTransport
-      ) {
-        await transport.close();
-      }
-      // Update status to disconnected
-      updateMCPServerStatus(mcpServerName, MCPServerStatus.DISCONNECTED);
-      return;
-    }
+      if (!tool || !Array.isArray(tool.functionDeclarations)) {
+        console.error(
+          `MCP server '${mcpServerName}' did not return valid tool function declarations. Skipping tool registration.`,
+        );
+      } else {
 
     for (const funcDecl of tool.functionDeclarations) {
       if (!funcDecl.name) {
@@ -367,53 +362,56 @@ async function connectAndDiscover(
         ),
       );
     }
-  } catch (error) {
-    console.error(
-      `Failed to list or register tools for MCP server '${mcpServerName}': ${error}`,
-    );
-    // Ensure transport is cleaned up on error too
-    if (
-      transport instanceof StdioClientTransport ||
-      transport instanceof SSEClientTransport ||
-      transport instanceof StreamableHTTPClientTransport
-    ) {
-      await transport.close();
+      }
+    } catch (error) {
+      console.error(
+        `Failed to list or register tools for MCP server '${mcpServerName}': ${error}`,
+      );
+      // Don't disconnect yet - the server might still support prompts
     }
-    // Update status to disconnected
-    updateMCPServerStatus(mcpServerName, MCPServerStatus.DISCONNECTED);
+  } else {
+    // Server does not support tools
+    console.debug(
+      `MCP server '${mcpServerName}' does not support tools. Skipping tool discovery.`,
+    );
   }
 
-  // Discover prompts from MCP server
-  try {
-    // Try to list prompts directly - if the server doesn't support prompts,
-    // it will either return an empty list or throw an error
-    const promptsResult = await mcpClient.listPrompts();
-    if (promptsResult?.prompts && Array.isArray(promptsResult.prompts)) {
-      for (const prompt of promptsResult.prompts) {
-        if (!prompt.name) {
-          console.warn(
-            `Discovered a prompt without a name from MCP server '${mcpServerName}'. Skipping.`,
-          );
-          continue;
+  // Discover prompts from MCP server if supported
+  if (capabilities?.prompts) {
+    try {
+      const promptsResult = await mcpClient.listPrompts();
+      if (promptsResult?.prompts && Array.isArray(promptsResult.prompts)) {
+        for (const prompt of promptsResult.prompts) {
+          if (!prompt.name) {
+            console.warn(
+              `Discovered a prompt without a name from MCP server '${mcpServerName}'. Skipping.`,
+            );
+            continue;
+          }
+
+          // Create a unique key for the prompt (prefixed with server name to avoid conflicts)
+          const promptKey = `${mcpServerName}:${prompt.name}`;
+
+          // Store the prompt in our registry
+          mcpPromptsRegistry.set(promptKey, {
+            name: prompt.name,
+            description: prompt.description,
+            arguments: prompt.arguments,
+            serverName: mcpServerName,
+            client: mcpClient,
+          });
         }
-
-        // Create a unique key for the prompt (prefixed with server name to avoid conflicts)
-        const promptKey = `${mcpServerName}:${prompt.name}`;
-
-        // Store the prompt in our registry
-        mcpPromptsRegistry.set(promptKey, {
-          name: prompt.name,
-          description: prompt.description,
-          arguments: prompt.arguments,
-          serverName: mcpServerName,
-          client: mcpClient,
-        });
       }
+    } catch (error) {
+      // This should not happen if the server advertises prompt support
+      console.error(
+        `MCP server '${mcpServerName}' advertises prompt support but failed to list prompts: ${error}`,
+      );
     }
-  } catch (error) {
-    // Server might not support prompts - this is not a critical error
+  } else {
+    // Server does not support prompts
     console.debug(
-      `MCP server '${mcpServerName}' does not support prompts or failed to list them: ${error}`,
+      `MCP server '${mcpServerName}' does not support prompts. Skipping prompt discovery.`,
     );
   }
 
