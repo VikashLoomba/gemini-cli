@@ -18,6 +18,8 @@ import {
   MCPServerStatus,
   getMCPDiscoveryState,
   getMCPServerStatus,
+  getMCPPrompts,
+  getMCPPrompt,
 } from '@google/gemini-cli-core';
 import { useSessionStats } from '../contexts/SessionContext.js';
 import {
@@ -1139,6 +1141,11 @@ export const useSlashCommandProcessor = (
                     );
                   }
                 }
+              case 'send_prompt':
+                return {
+                  type: 'send_prompt',
+                  prompt: result.prompt,
+                };
               default: {
                 const unhandled: never = result;
                 throw new Error(`Unhandled slash command result: ${unhandled}`);
@@ -1216,6 +1223,86 @@ export const useSlashCommandProcessor = (
     ],
   );
 
+  // Create slash commands from MCP prompts
+  const mcpPromptCommands = useMemo(() => {
+    const prompts = getMCPPrompts();
+    return prompts.map((prompt): SlashCommand => {
+      // Create a sanitized command name from the prompt name
+      const commandName = prompt.name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
+      return {
+        name: commandName,
+        description: `${prompt.description || 'MCP prompt'} (from ${prompt.serverName})`,
+        action: async (context: CommandContext, args: string) => {
+          try {
+            // Parse arguments from the args string
+            const argPairs = args.trim().split(/\s+/);
+            const promptArgs: Record<string, string> = {};
+
+            // Simple argument parsing: key=value pairs
+            for (const pair of argPairs) {
+              const [key, ...valueParts] = pair.split('=');
+              if (key && valueParts.length > 0) {
+                promptArgs[key] = valueParts.join('=');
+              }
+            }
+
+            // Check if all required arguments are provided
+            if (prompt.arguments) {
+              for (const arg of prompt.arguments) {
+                if (arg.required && !promptArgs[arg.name]) {
+                  return {
+                    type: 'message',
+                    messageType: 'error',
+                    content: `Missing required argument: ${arg.name}\nUsage: /${commandName} ${prompt.arguments
+                      .map(
+                        (a) =>
+                          `${a.name}=<value>${a.required ? '' : ' (optional)'}`,
+                      )
+                      .join(' ')}`,
+                  };
+                }
+              }
+            }
+
+            // Get the prompt from the MCP server
+            const promptResult = await getMCPPrompt(prompt, promptArgs);
+
+            // Extract the text content from the prompt messages to send to the LLM
+            let promptText = '';
+            for (const message of promptResult.messages) {
+              if (message.role === 'user') {
+                if (message.content.type === 'text' && message.content.text) {
+                  promptText += message.content.text + '\n\n';
+                } else if (
+                  message.content.type === 'resource' &&
+                  message.content.resource
+                ) {
+                  promptText += `Content from ${message.content.resource.uri}:\n`;
+                  if (message.content.resource.text) {
+                    promptText += message.content.resource.text + '\n\n';
+                  }
+                }
+              }
+            }
+
+            // Return the prompt to be sent to the LLM
+            return {
+              type: 'send_prompt',
+              prompt: promptText.trim(),
+            };
+          } catch (error) {
+            return {
+              type: 'message',
+              messageType: 'error',
+              content: `Failed to execute prompt: ${error instanceof Error ? error.message : String(error)}`,
+            };
+          }
+        },
+      };
+    });
+  }, []);
+
   const allCommands = useMemo(() => {
     // Adapt legacy commands to the new SlashCommand interface
     const adaptedLegacyCommands: SlashCommand[] = legacyCommands.map(
@@ -1242,8 +1329,8 @@ export const useSlashCommandProcessor = (
       (c) => !newCommandNames.has(c.name),
     );
 
-    return [...commands, ...filteredAdaptedLegacy];
-  }, [commands, legacyCommands]);
+    return [...commands, ...filteredAdaptedLegacy, ...mcpPromptCommands];
+  }, [commands, legacyCommands, mcpPromptCommands]);
 
   return {
     handleSlashCommand,

@@ -228,4 +228,8 @@ export type SlashCommandProcessorResult =
     }
   | {
       type: 'handled'; // Indicates the command was processed and no further action is needed.
+    }
+  | {
+      type: 'send_prompt'; // Indicates a prompt should be sent to the LLM
+      prompt: string;
     };

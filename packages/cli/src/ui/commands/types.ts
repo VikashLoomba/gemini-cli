@@ -69,10 +69,19 @@ export interface OpenDialogActionReturn {
   dialog: 'help';
 }
 
+/**
+ * The return type for a command action that sends a prompt to the LLM.
+ */
+export interface SendPromptActionReturn {
+  type: 'send_prompt';
+  prompt: string;
+}
+
 export type SlashCommandActionReturn =
   | ToolActionReturn
   | MessageActionReturn
-  | OpenDialogActionReturn;
+  | OpenDialogActionReturn
+  | SendPromptActionReturn;
 
 // The standardized contract for any command in the system.
 export interface SlashCommand {

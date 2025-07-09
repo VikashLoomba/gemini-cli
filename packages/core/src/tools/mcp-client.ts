@@ -14,6 +14,7 @@ import {
 import { parse } from 'shell-quote';
 import { MCPServerConfig } from '../config/config.js';
 import { DiscoveredMCPTool } from './mcp-tool.js';
+import { MCPPrompt } from './mcp-prompt.js';
 import { Type, mcpToTool } from '@google/genai';
 import { sanitizeParameters, ToolRegistry } from './tool-registry.js';
 
@@ -47,6 +48,11 @@ export enum MCPDiscoveryState {
  * Map to track the status of each MCP server within the core package
  */
 const mcpServerStatusesInternal: Map<string, MCPServerStatus> = new Map();
+
+/**
+ * Map to store discovered MCP prompts
+ */
+const mcpPromptsRegistry: Map<string, MCPPrompt> = new Map();
 
 /**
  * Track the overall MCP discovery state
@@ -118,6 +124,13 @@ export function getAllMCPServerStatuses(): Map<string, MCPServerStatus> {
  */
 export function getMCPDiscoveryState(): MCPDiscoveryState {
   return mcpDiscoveryState;
+}
+
+/**
+ * Get all discovered MCP prompts
+ */
+export function getMCPPrompts(): MCPPrompt[] {
+  return Array.from(mcpPromptsRegistry.values());
 }
 
 export async function discoverMcpTools(
@@ -370,14 +383,53 @@ async function connectAndDiscover(
     updateMCPServerStatus(mcpServerName, MCPServerStatus.DISCONNECTED);
   }
 
-  // If no tools were registered from this MCP server, the following 'if' block
+  // Discover prompts from MCP server
+  try {
+    // Try to list prompts directly - if the server doesn't support prompts,
+    // it will either return an empty list or throw an error
+    const promptsResult = await mcpClient.listPrompts();
+    if (promptsResult?.prompts && Array.isArray(promptsResult.prompts)) {
+      for (const prompt of promptsResult.prompts) {
+        if (!prompt.name) {
+          console.warn(
+            `Discovered a prompt without a name from MCP server '${mcpServerName}'. Skipping.`,
+          );
+          continue;
+        }
+
+        // Create a unique key for the prompt (prefixed with server name to avoid conflicts)
+        const promptKey = `${mcpServerName}:${prompt.name}`;
+
+        // Store the prompt in our registry
+        mcpPromptsRegistry.set(promptKey, {
+          name: prompt.name,
+          description: prompt.description,
+          arguments: prompt.arguments,
+          serverName: mcpServerName,
+          client: mcpClient,
+        });
+      }
+    }
+  } catch (error) {
+    // Server might not support prompts - this is not a critical error
+    console.debug(
+      `MCP server '${mcpServerName}' does not support prompts or failed to list them: ${error}`,
+    );
+  }
+
+  // If no tools or prompts were registered from this MCP server, the following 'if' block
   // will close the connection. This is done to conserve resources and prevent
   // an orphaned connection to a server that isn't providing any usable
-  // functionality. Connections to servers that did provide tools are kept
-  // open, as those tools will require the connection to function.
-  if (toolRegistry.getToolsByServer(mcpServerName).length === 0) {
+  // functionality. Connections to servers that did provide tools or prompts are kept
+  // open, as those features will require the connection to function.
+  const hasTools = toolRegistry.getToolsByServer(mcpServerName).length > 0;
+  const hasPrompts = Array.from(mcpPromptsRegistry.values()).some(
+    (prompt) => prompt.serverName === mcpServerName,
+  );
+
+  if (!hasTools && !hasPrompts) {
     console.log(
-      `No tools registered from MCP server '${mcpServerName}'. Closing connection.`,
+      `No tools or prompts registered from MCP server '${mcpServerName}'. Closing connection.`,
     );
     if (
       transport instanceof StdioClientTransport ||
