@@ -304,9 +304,6 @@ async function connectAndDiscover(
 
     for (const funcDecl of tool.functionDeclarations) {
       if (!funcDecl.name) {
-        console.warn(
-          `Discovered a function declaration without a name from MCP server '${mcpServerName}'. Skipping.`,
-        );
         continue;
       }
 
@@ -371,9 +368,6 @@ async function connectAndDiscover(
     }
   } else {
     // Server does not support tools
-    console.debug(
-      `MCP server '${mcpServerName}' does not support tools. Skipping tool discovery.`,
-    );
   }
 
   // Discover prompts from MCP server if supported
@@ -383,9 +377,6 @@ async function connectAndDiscover(
       if (promptsResult?.prompts && Array.isArray(promptsResult.prompts)) {
         for (const prompt of promptsResult.prompts) {
           if (!prompt.name) {
-            console.warn(
-              `Discovered a prompt without a name from MCP server '${mcpServerName}'. Skipping.`,
-            );
             continue;
           }
 
@@ -410,9 +401,6 @@ async function connectAndDiscover(
     }
   } else {
     // Server does not support prompts
-    console.debug(
-      `MCP server '${mcpServerName}' does not support prompts. Skipping prompt discovery.`,
-    );
   }
 
   // If no tools or prompts were registered from this MCP server, the following 'if' block
