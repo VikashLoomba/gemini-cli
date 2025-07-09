@@ -1083,7 +1083,7 @@ export const useSlashCommandProcessor = (
 
       // --- Start of New Tree Traversal Logic ---
 
-      let currentCommands = commands;
+      let currentCommands = allCommands;
       let commandToExecute: SlashCommand | undefined;
       let pathIndex = 0;
 
@@ -1218,7 +1218,7 @@ export const useSlashCommandProcessor = (
     [
       addItem,
       setShowHelp,
-      commands,
+      allCommands,
       legacyCommands,
       commandContext,
       addMessage,
