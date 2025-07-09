@@ -11,6 +11,7 @@ An MCP server enables the Gemini CLI to:
 - **Discover tools:** List available tools, their descriptions, and parameters through standardized schema definitions.
 - **Execute tools:** Call specific tools with defined arguments and receive structured responses.
 - **Access resources:** Read data from specific resources (though the Gemini CLI primarily focuses on tool execution).
+- **Provide prompts:** Expose reusable prompt templates as slash commands for common workflows.
 
 With an MCP server, you can extend the Gemini CLI's capabilities to perform actions beyond its built-in features, such as interacting with databases, APIs, custom scripts, or specialized workflows.
 
@@ -25,8 +26,9 @@ The discovery process is orchestrated by `discoverMcpTools()`, which:
 1. **Iterates through configured servers** from your `settings.json` `mcpServers` configuration
 2. **Establishes connections** using appropriate transport mechanisms (Stdio, SSE, or Streamable HTTP)
 3. **Fetches tool definitions** from each server using the MCP protocol
-4. **Sanitizes and validates** tool schemas for compatibility with the Gemini API
-5. **Registers tools** in the global tool registry with conflict resolution
+4. **Discovers prompts** by calling `prompts/list` on each server
+5. **Sanitizes and validates** tool schemas for compatibility with the Gemini API
+6. **Registers tools and prompts** in the global registries with conflict resolution
 
 ### Execution Layer (`mcp-tool.ts`)
 
@@ -316,29 +318,34 @@ This displays:
 - **Connection status:** `CONNECTED`, `CONNECTING`, or `DISCONNECTED`
 - **Server details:** Configuration summary (excluding sensitive data)
 - **Available tools:** List of tools from each server with descriptions
+- **Available prompts:** List of prompts from each server with descriptions
 - **Discovery state:** Overall discovery process status
 
 ### Example `/mcp` Output
 
 ```
-MCP Servers Status:
+Configured MCP servers:
 
-📡 pythonTools (CONNECTED)
-  Command: python -m my_mcp_server --port 8080
-  Working Directory: ./mcp-servers/python
-  Timeout: 15000ms
-  Tools: calculate_sum, file_analyzer, data_processor
+🟢 pythonTools - Ready (3 tools, 2 prompts)
+  - calculate_sum: Add numbers together
+  - file_analyzer: Analyze file contents
+  - data_processor: Process data arrays
+  / analyze-code: Generate code analysis
+  / git-commit: Generate commit messages
 
-🔌 nodeServer (DISCONNECTED)
-  Command: node dist/server.js --verbose
-  Error: Connection refused
+🔴 nodeServer - Disconnected (1 tool cached)
+  - api_caller: Call REST APIs
 
-🐳 dockerizedServer (CONNECTED)
-  Command: docker run -i --rm -e API_KEY my-mcp-server:latest
-  Tools: docker__deploy, docker__status
-
-Discovery State: COMPLETED
+🟢 dockerizedServer - Ready (2 tools)
+  - docker__deploy: Deploy containers
+  - docker__status: Check container status
 ```
+
+In this display:
+- **Tools** are shown with `- toolname` (cyan color)
+- **Prompts** are shown with `/ promptname` (magenta color)
+- **Counts** show both tools and prompts: `(3 tools, 2 prompts)`
+- **Server status** is indicated with colored emojis (🟢 Ready, 🔴 Disconnected, 🔄 Starting)
 
 ### Tool Usage
 
@@ -348,6 +355,22 @@ Once discovered, MCP tools are available to the Gemini model like built-in tools
 2. **Present confirmation dialogs** (unless the server is trusted)
 3. **Execute tools** with proper parameters
 4. **Display results** in a user-friendly format
+
+### Prompt Usage
+
+MCP prompts are exposed as slash commands that you can use directly. For example, if a server exposes a prompt named `analyze-code`, you can use it as:
+
+```bash
+/analyze-code language=python
+```
+
+When you use a prompt slash command:
+
+1. **The CLI calls the MCP server** with the prompt name and your arguments
+2. **The server returns formatted messages** containing the prompt content
+3. **The messages are injected into the conversation** as if you typed them
+
+This allows MCP servers to provide reusable prompt templates for common workflows like code analysis, commit message generation, or documentation writing.
 
 ## Status Monitoring and Troubleshooting
 
