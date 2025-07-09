@@ -64,6 +64,7 @@ import {
   MCPServerStatus,
   getMCPDiscoveryState,
   getMCPServerStatus,
+  getMCPPromptRegistry,
   GeminiClient,
 } from '@google/gemini-cli-core';
 import { useSessionStats } from '../contexts/SessionContext.js';
@@ -95,6 +96,9 @@ vi.mock('@google/gemini-cli-core', async (importOriginal) => {
     ...actual,
     getMCPServerStatus: vi.fn(),
     getMCPDiscoveryState: vi.fn(),
+    getMCPPromptRegistry: vi.fn(() => ({
+      getPromptsByServer: vi.fn(() => []),
+    })),
   };
 });
 
@@ -992,7 +996,7 @@ describe('useSlashCommandProcessor', () => {
 
       // Check that the message contains details about servers and their tools
       const message = mockAddItem.mock.calls[1][0].text;
-      // Server 1 - Connected
+      // Server 1 - Connected (now shows both tools and prompts count)
       expect(message).toContain(
         '🟢 \u001b[1mserver1\u001b[0m - Ready (2 tools)',
       );
@@ -1001,13 +1005,13 @@ describe('useSlashCommandProcessor', () => {
 
       // Server 2 - Connected
       expect(message).toContain(
-        '🟢 \u001b[1mserver2\u001b[0m - Ready (1 tools)',
+        '🟢 \u001b[1mserver2\u001b[0m - Ready (1 tool)',
       );
       expect(message).toContain('\u001b[36mserver2_tool1\u001b[0m');
 
       // Server 3 - Disconnected
       expect(message).toContain(
-        '🔴 \u001b[1mserver3\u001b[0m - Disconnected (1 tools cached)',
+        '🔴 \u001b[1mserver3\u001b[0m - Disconnected (1 tool cached)',
       );
       expect(message).toContain('\u001b[36mserver3_tool1\u001b[0m');
 
@@ -1140,11 +1144,11 @@ describe('useSlashCommandProcessor', () => {
       // Check that the message contains details about both servers and their tools
       const message = mockAddItem.mock.calls[1][0].text;
       expect(message).toContain(
-        '🟢 \u001b[1mserver1\u001b[0m - Ready (1 tools)',
+        '🟢 \u001b[1mserver1\u001b[0m - Ready (1 tool)',
       );
       expect(message).toContain('\u001b[36mserver1_tool1\u001b[0m');
       expect(message).toContain(
-        '🔴 \u001b[1mserver2\u001b[0m - Disconnected (0 tools cached)',
+        '🔴 \u001b[1mserver2\u001b[0m - Disconnected (no tools or prompts cached)',
       );
       expect(message).toContain('No tools available');
 
@@ -1206,10 +1210,10 @@ describe('useSlashCommandProcessor', () => {
 
       // Check server statuses
       expect(message).toContain(
-        '🟢 \u001b[1mserver1\u001b[0m - Ready (1 tools)',
+        '🟢 \u001b[1mserver1\u001b[0m - Ready (1 tool)',
       );
       expect(message).toContain(
-        '🔄 \u001b[1mserver2\u001b[0m - Starting... (first startup may take longer) (tools will appear when ready)',
+        '🔄 \u001b[1mserver2\u001b[0m - Starting... (first startup may take longer) (tools and prompts will appear when ready)',
       );
 
       expect(commandResult).toEqual({ type: 'handled' });

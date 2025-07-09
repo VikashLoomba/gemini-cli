@@ -18,6 +18,7 @@ import {
   MCPServerStatus,
   getMCPDiscoveryState,
   getMCPServerStatus,
+  getMCPPromptRegistry,
 } from '@google/gemini-cli-core';
 import { useSessionStats } from '../contexts/SessionContext.js';
 import {
@@ -296,7 +297,7 @@ export const useSlashCommandProcessor = (
       },
       {
         name: 'mcp',
-        description: 'list configured MCP servers and tools',
+        description: 'list configured MCP servers, tools, and prompts',
         action: async (_mainCommand, _subCommand, _args) => {
           // Check if the _subCommand includes a specific flag to control description visibility
           let useShowDescriptions = showToolDescriptions;
@@ -371,6 +372,8 @@ export const useSlashCommandProcessor = (
 
           for (const serverName of serverNames) {
             const serverTools = toolRegistry.getToolsByServer(serverName);
+            const promptRegistry = getMCPPromptRegistry();
+            const serverPrompts = promptRegistry.getPromptsByServer(serverName);
             const status = getMCPServerStatus(serverName);
 
             // Add status indicator with descriptive text
@@ -398,13 +401,31 @@ export const useSlashCommandProcessor = (
             // Format server header with bold formatting and status
             message += `${statusIndicator} \u001b[1m${serverName}\u001b[0m - ${statusText}`;
 
-            // Add tool count with conditional messaging
+            // Add tool and prompt count with conditional messaging
+            const toolCount = serverTools.length;
+            const promptCount = serverPrompts.length;
+            const hasContent = toolCount > 0 || promptCount > 0;
+            
             if (status === MCPServerStatus.CONNECTED) {
-              message += ` (${serverTools.length} tools)`;
+              if (hasContent) {
+                const parts = [];
+                if (toolCount > 0) parts.push(`${toolCount} tool${toolCount === 1 ? '' : 's'}`);
+                if (promptCount > 0) parts.push(`${promptCount} prompt${promptCount === 1 ? '' : 's'}`);
+                message += ` (${parts.join(', ')})`;
+              } else {
+                message += ` (no tools or prompts)`;
+              }
             } else if (status === MCPServerStatus.CONNECTING) {
-              message += ` (tools will appear when ready)`;
+              message += ` (tools and prompts will appear when ready)`;
             } else {
-              message += ` (${serverTools.length} tools cached)`;
+              if (hasContent) {
+                const parts = [];
+                if (toolCount > 0) parts.push(`${toolCount} tool${toolCount === 1 ? '' : 's'}`);
+                if (promptCount > 0) parts.push(`${promptCount} prompt${promptCount === 1 ? '' : 's'}`);
+                message += ` (${parts.join(', ')} cached)`;
+              } else {
+                message += ` (no tools or prompts cached)`;
+              }
             }
 
             // Add server description with proper handling of multi-line descriptions
@@ -480,6 +501,57 @@ export const useSlashCommandProcessor = (
             } else {
               message += '  No tools available\n';
             }
+
+            // Display prompts
+            if (serverPrompts.length > 0) {
+              serverPrompts.forEach((prompt) => {
+                if (
+                  (useShowDescriptions || useShowSchema) &&
+                  prompt.description
+                ) {
+                  // Format prompt name in magenta to distinguish from tools
+                  message += `  / \u001b[35m${prompt.name}\u001b[0m`;
+
+                  // Apply green color to the description text
+                  const greenColor = '\u001b[32m';
+                  const resetColor = '\u001b[0m';
+
+                  // Handle multi-line descriptions by properly indenting and preserving formatting
+                  const descLines = prompt.description.trim().split('\n');
+                  if (descLines) {
+                    message += ':\n';
+                    for (const descLine of descLines) {
+                      message += `      ${greenColor}${descLine}${resetColor}\n`;
+                    }
+                  } else {
+                    message += '\n';
+                  }
+                } else {
+                  // Use magenta color for the prompt name even when not showing descriptions
+                  message += `  / \u001b[35m${prompt.name}\u001b[0m\n`;
+                }
+                
+                if (useShowSchema && prompt.arguments && prompt.arguments.length > 0) {
+                  // Show prompt arguments
+                  message += `    \u001b[35mArguments:\u001b[0m\n`;
+                  const greenColor = '\u001b[32m';
+                  const resetColor = '\u001b[0m';
+
+                  for (const arg of prompt.arguments) {
+                    const requiredText = arg.required ? ' (required)' : ' (optional)';
+                    message += `      ${greenColor}${arg.name}${requiredText}`;
+                    if (arg.description) {
+                      message += `: ${arg.description}`;
+                    }
+                    message += `${resetColor}\n`;
+                  }
+                }
+              });
+            } else if (serverTools.length === 0) {
+              // Only show "no prompts" if we also have no tools
+              message += '  No prompts available\n';
+            }
+            
             message += '\n';
           }
 

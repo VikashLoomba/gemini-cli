@@ -16,6 +16,8 @@ import { MCPServerConfig } from '../config/config.js';
 import { DiscoveredMCPTool } from './mcp-tool.js';
 import { Type, mcpToTool } from '@google/genai';
 import { sanitizeParameters, ToolRegistry } from './tool-registry.js';
+import { discoverMCPPrompts, promptToSlashCommandName, type DiscoveredMCPPrompt } from './mcp-prompt.js';
+import { MCPPromptRegistry } from './mcp-prompt-registry.js';
 
 export const MCP_DEFAULT_TIMEOUT_MSEC = 10 * 60 * 1000; // default to 10 minutes
 
@@ -47,6 +49,11 @@ export enum MCPDiscoveryState {
  * Map to track the status of each MCP server within the core package
  */
 const mcpServerStatusesInternal: Map<string, MCPServerStatus> = new Map();
+
+/**
+ * Global registry for discovered MCP prompts
+ */
+const mcpPromptRegistry = new MCPPromptRegistry();
 
 /**
  * Track the overall MCP discovery state
@@ -118,6 +125,13 @@ export function getAllMCPServerStatuses(): Map<string, MCPServerStatus> {
  */
 export function getMCPDiscoveryState(): MCPDiscoveryState {
   return mcpDiscoveryState;
+}
+
+/**
+ * Get the MCP prompt registry
+ */
+export function getMCPPromptRegistry(): MCPPromptRegistry {
+  return mcpPromptRegistry;
 }
 
 export async function discoverMcpTools(
@@ -370,14 +384,61 @@ async function connectAndDiscover(
     updateMCPServerStatus(mcpServerName, MCPServerStatus.DISCONNECTED);
   }
 
-  // If no tools were registered from this MCP server, the following 'if' block
+  // Discover prompts from the MCP server
+  try {
+    const prompts = await discoverMCPPrompts(
+      mcpClient,
+      mcpServerConfig.timeout ?? MCP_DEFAULT_TIMEOUT_MSEC,
+    );
+
+    for (const prompt of prompts) {
+      if (!prompt.name) {
+        console.warn(
+          `Discovered a prompt without a name from MCP server '${mcpServerName}'. Skipping.`,
+        );
+        continue;
+      }
+
+      // Create a command name for the prompt
+      const commandName = promptToSlashCommandName(mcpServerName, prompt.name);
+
+      // Register the prompt
+      const discoveredPrompt: DiscoveredMCPPrompt = {
+        client: mcpClient,
+        serverName: mcpServerName,
+        name: commandName,
+        description: prompt.description,
+        arguments: prompt.arguments,
+        trust: mcpServerConfig.trust,
+        timeout: mcpServerConfig.timeout ?? MCP_DEFAULT_TIMEOUT_MSEC,
+      };
+
+      mcpPromptRegistry.registerPrompt(discoveredPrompt);
+    }
+
+    if (prompts.length > 0) {
+      console.log(
+        `Registered ${prompts.length} prompt(s) from MCP server '${mcpServerName}'`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      `Failed to discover prompts for MCP server '${mcpServerName}': ${error}`,
+    );
+    // Don't fail the entire connection if prompts fail - tools might still work
+  }
+
+  // If no tools or prompts were registered from this MCP server, the following 'if' block
   // will close the connection. This is done to conserve resources and prevent
   // an orphaned connection to a server that isn't providing any usable
-  // functionality. Connections to servers that did provide tools are kept
-  // open, as those tools will require the connection to function.
-  if (toolRegistry.getToolsByServer(mcpServerName).length === 0) {
+  // functionality. Connections to servers that did provide tools or prompts are kept
+  // open, as those tools/prompts will require the connection to function.
+  const toolCount = toolRegistry.getToolsByServer(mcpServerName).length;
+  const promptCount = mcpPromptRegistry.getPromptsByServer(mcpServerName).length;
+  
+  if (toolCount === 0 && promptCount === 0) {
     console.log(
-      `No tools registered from MCP server '${mcpServerName}'. Closing connection.`,
+      `No tools or prompts registered from MCP server '${mcpServerName}'. Closing connection.`,
     );
     if (
       transport instanceof StdioClientTransport ||
