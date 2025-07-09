@@ -20,6 +20,8 @@ import {
   getMCPServerStatus,
   getMCPPrompts,
   getMCPPrompt,
+  addMCPStatusChangeListener,
+  removeMCPStatusChangeListener,
 } from '@google/gemini-cli-core';
 import { useSessionStats } from '../contexts/SessionContext.js';
 import {
@@ -1301,6 +1303,21 @@ export const useSlashCommandProcessor = (
         },
       };
     });
+  }, [mcpPromptVersion]);
+
+  // Track MCP prompt changes to trigger re-rendering of commands
+  const [mcpPromptVersion, setMcpPromptVersion] = useState(0);
+
+  // Listen for MCP server status changes to update prompt commands
+  useEffect(() => {
+    const handleStatusChange = (serverName: string, status: MCPServerStatus) => {
+      // When a server becomes connected, it may have new prompts
+      // When a server disconnects, its prompts are no longer available
+      setMcpPromptVersion(prev => prev + 1);
+    };
+
+    addMCPStatusChangeListener(handleStatusChange);
+    return () => removeMCPStatusChangeListener(handleStatusChange);
   }, []);
 
   const allCommands = useMemo(() => {
