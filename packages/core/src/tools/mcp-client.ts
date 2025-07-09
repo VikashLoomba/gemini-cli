@@ -69,6 +69,12 @@ type StatusChangeListener = (
 const statusChangeListeners: StatusChangeListener[] = [];
 
 /**
+ * Event listeners for MCP prompt changes
+ */
+type PromptChangeListener = () => void;
+const promptChangeListeners: PromptChangeListener[] = [];
+
+/**
  * Add a listener for MCP server status changes
  */
 export function addMCPStatusChangeListener(
@@ -90,6 +96,25 @@ export function removeMCPStatusChangeListener(
 }
 
 /**
+ * Add a listener for MCP prompt changes
+ */
+export function addMCPPromptChangeListener(listener: PromptChangeListener): void {
+  promptChangeListeners.push(listener);
+}
+
+/**
+ * Remove a listener for MCP prompt changes
+ */
+export function removeMCPPromptChangeListener(
+  listener: PromptChangeListener,
+): void {
+  const index = promptChangeListeners.indexOf(listener);
+  if (index !== -1) {
+    promptChangeListeners.splice(index, 1);
+  }
+}
+
+/**
  * Update the status of an MCP server
  */
 function updateMCPServerStatus(
@@ -100,6 +125,15 @@ function updateMCPServerStatus(
   // Notify all listeners
   for (const listener of statusChangeListeners) {
     listener(serverName, status);
+  }
+}
+
+/**
+ * Notify all prompt change listeners
+ */
+function notifyPromptChangeListeners(): void {
+  for (const listener of promptChangeListeners) {
+    listener();
   }
 }
 
@@ -375,6 +409,7 @@ async function connectAndDiscover(
     try {
       const promptsResult = await mcpClient.listPrompts();
       if (promptsResult?.prompts && Array.isArray(promptsResult.prompts)) {
+        let promptsAdded = false;
         for (const prompt of promptsResult.prompts) {
           if (!prompt.name) {
             continue;
@@ -391,6 +426,12 @@ async function connectAndDiscover(
             serverName: mcpServerName,
             client: mcpClient,
           });
+          promptsAdded = true;
+        }
+        
+        // Notify listeners that prompts have been added
+        if (promptsAdded) {
+          notifyPromptChangeListeners();
         }
       }
     } catch (error) {
