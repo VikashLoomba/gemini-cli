@@ -1057,6 +1057,129 @@ export const useSlashCommandProcessor = (
     refreshStatic,
   ]);
 
+  // Track MCP prompt changes to trigger re-rendering of commands
+  const [mcpPromptVersion, setMcpPromptVersion] = useState(0);
+
+  // Create slash commands from MCP prompts
+  const mcpPromptCommands = useMemo(() => {
+    const prompts = getMCPPrompts();
+    return prompts.map((prompt): SlashCommand => {
+      // Create a sanitized command name from the prompt name
+      const commandName = prompt.name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
+      return {
+        name: commandName,
+        description: `${prompt.description || 'MCP prompt'} (from ${prompt.serverName})`,
+        action: async (context: CommandContext, args: string) => {
+          try {
+            // Parse arguments from the args string
+            const argPairs = args.trim().split(/\s+/);
+            const promptArgs: Record<string, string> = {};
+
+            // Simple argument parsing: key=value pairs
+            for (const pair of argPairs) {
+              const [key, ...valueParts] = pair.split('=');
+              if (key && valueParts.length > 0) {
+                promptArgs[key] = valueParts.join('=');
+              }
+            }
+
+            // Check if all required arguments are provided
+            if (prompt.arguments) {
+              for (const arg of prompt.arguments) {
+                if (arg.required && !promptArgs[arg.name]) {
+                  return {
+                    type: 'message',
+                    messageType: 'error',
+                    content: `Missing required argument: ${arg.name}\nUsage: /${commandName} ${prompt.arguments
+                      .map(
+                        (a) =>
+                          `${a.name}=<value>${a.required ? '' : ' (optional)'}`,
+                      )
+                      .join(' ')}`,
+                  };
+                }
+              }
+            }
+
+            // Get the prompt from the MCP server
+            const promptResult = await getMCPPrompt(prompt, promptArgs);
+
+            // Extract the text content from the prompt messages to send to the LLM
+            let promptText = '';
+            for (const message of promptResult.messages) {
+              if (message.role === 'user') {
+                if (message.content.type === 'text' && message.content.text) {
+                  promptText += message.content.text + '\n\n';
+                } else if (
+                  message.content.type === 'resource' &&
+                  message.content.resource
+                ) {
+                  promptText += `Content from ${message.content.resource.uri}:\n`;
+                  if (message.content.resource.text) {
+                    promptText += message.content.resource.text + '\n\n';
+                  }
+                }
+              }
+            }
+
+            // Return the prompt to be sent to the LLM
+            return {
+              type: 'send_prompt',
+              prompt: promptText.trim(),
+            };
+          } catch (error) {
+            return {
+              type: 'message',
+              messageType: 'error',
+              content: `Failed to execute prompt: ${error instanceof Error ? error.message : String(error)}`,
+            };
+          }
+        },
+      };
+    });
+  }, [mcpPromptVersion]);
+
+  // Listen for MCP prompt changes to update prompt commands
+  useEffect(() => {
+    const handlePromptChange = () => {
+      // When prompts are discovered or removed, update the command list
+      setMcpPromptVersion(prev => prev + 1);
+    };
+
+    addMCPPromptChangeListener(handlePromptChange);
+    return () => removeMCPPromptChangeListener(handlePromptChange);
+  }, []);
+
+  const allCommands = useMemo(() => {
+    // Adapt legacy commands to the new SlashCommand interface
+    const adaptedLegacyCommands: SlashCommand[] = legacyCommands.map(
+      (legacyCmd) => ({
+        name: legacyCmd.name,
+        altName: legacyCmd.altName,
+        description: legacyCmd.description,
+        action: async (_context: CommandContext, args: string) => {
+          const parts = args.split(/\s+/);
+          const subCommand = parts[0] || undefined;
+          const restOfArgs = parts.slice(1).join(' ') || undefined;
+
+          return legacyCmd.action(legacyCmd.name, subCommand, restOfArgs);
+        },
+        completion: legacyCmd.completion
+          ? async (_context: CommandContext, _partialArg: string) =>
+              legacyCmd.completion!()
+          : undefined,
+      }),
+    );
+
+    const newCommandNames = new Set(commands.map((c) => c.name));
+    const filteredAdaptedLegacy = adaptedLegacyCommands.filter(
+      (c) => !newCommandNames.has(c.name),
+    );
+
+    return [...commands, ...filteredAdaptedLegacy, ...mcpPromptCommands];
+  }, [commands, legacyCommands, mcpPromptCommands]);
+
   const handleSlashCommand = useCallback(
     async (
       rawQuery: PartListUnion,
@@ -1224,129 +1347,6 @@ export const useSlashCommandProcessor = (
       addMessage,
     ],
   );
-
-  // Track MCP prompt changes to trigger re-rendering of commands
-  const [mcpPromptVersion, setMcpPromptVersion] = useState(0);
-
-  // Create slash commands from MCP prompts
-  const mcpPromptCommands = useMemo(() => {
-    const prompts = getMCPPrompts();
-    return prompts.map((prompt): SlashCommand => {
-      // Create a sanitized command name from the prompt name
-      const commandName = prompt.name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-
-      return {
-        name: commandName,
-        description: `${prompt.description || 'MCP prompt'} (from ${prompt.serverName})`,
-        action: async (context: CommandContext, args: string) => {
-          try {
-            // Parse arguments from the args string
-            const argPairs = args.trim().split(/\s+/);
-            const promptArgs: Record<string, string> = {};
-
-            // Simple argument parsing: key=value pairs
-            for (const pair of argPairs) {
-              const [key, ...valueParts] = pair.split('=');
-              if (key && valueParts.length > 0) {
-                promptArgs[key] = valueParts.join('=');
-              }
-            }
-
-            // Check if all required arguments are provided
-            if (prompt.arguments) {
-              for (const arg of prompt.arguments) {
-                if (arg.required && !promptArgs[arg.name]) {
-                  return {
-                    type: 'message',
-                    messageType: 'error',
-                    content: `Missing required argument: ${arg.name}\nUsage: /${commandName} ${prompt.arguments
-                      .map(
-                        (a) =>
-                          `${a.name}=<value>${a.required ? '' : ' (optional)'}`,
-                      )
-                      .join(' ')}`,
-                  };
-                }
-              }
-            }
-
-            // Get the prompt from the MCP server
-            const promptResult = await getMCPPrompt(prompt, promptArgs);
-
-            // Extract the text content from the prompt messages to send to the LLM
-            let promptText = '';
-            for (const message of promptResult.messages) {
-              if (message.role === 'user') {
-                if (message.content.type === 'text' && message.content.text) {
-                  promptText += message.content.text + '\n\n';
-                } else if (
-                  message.content.type === 'resource' &&
-                  message.content.resource
-                ) {
-                  promptText += `Content from ${message.content.resource.uri}:\n`;
-                  if (message.content.resource.text) {
-                    promptText += message.content.resource.text + '\n\n';
-                  }
-                }
-              }
-            }
-
-            // Return the prompt to be sent to the LLM
-            return {
-              type: 'send_prompt',
-              prompt: promptText.trim(),
-            };
-          } catch (error) {
-            return {
-              type: 'message',
-              messageType: 'error',
-              content: `Failed to execute prompt: ${error instanceof Error ? error.message : String(error)}`,
-            };
-          }
-        },
-      };
-    });
-  }, [mcpPromptVersion]);
-
-  // Listen for MCP prompt changes to update prompt commands
-  useEffect(() => {
-    const handlePromptChange = () => {
-      // When prompts are discovered or removed, update the command list
-      setMcpPromptVersion(prev => prev + 1);
-    };
-
-    addMCPPromptChangeListener(handlePromptChange);
-    return () => removeMCPPromptChangeListener(handlePromptChange);
-  }, []);
-
-  const allCommands = useMemo(() => {
-    // Adapt legacy commands to the new SlashCommand interface
-    const adaptedLegacyCommands: SlashCommand[] = legacyCommands.map(
-      (legacyCmd) => ({
-        name: legacyCmd.name,
-        altName: legacyCmd.altName,
-        description: legacyCmd.description,
-        action: async (_context: CommandContext, args: string) => {
-          const parts = args.split(/\s+/);
-          const subCommand = parts[0] || undefined;
-          const restOfArgs = parts.slice(1).join(' ') || undefined;
-
-          return legacyCmd.action(legacyCmd.name, subCommand, restOfArgs);
-        },
-        completion: legacyCmd.completion
-          ? async (_context: CommandContext, _partialArg: string) =>
-              legacyCmd.completion!()
-          : undefined,
-      }),
-    );
-
-    const newCommandNames = new Set(commands.map((c) => c.name));
-    const filteredAdaptedLegacy = adaptedLegacyCommands.filter(
-      (c) => !newCommandNames.has(c.name),
-    );
-
-    return [...commands, ...filteredAdaptedLegacy, ...mcpPromptCommands];
-  }, [commands, legacyCommands, mcpPromptCommands]);
 
   return {
     handleSlashCommand,
