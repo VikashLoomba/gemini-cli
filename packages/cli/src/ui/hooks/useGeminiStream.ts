@@ -242,6 +242,18 @@ export const useGeminiStream = (
               prompt_id,
             };
             scheduleToolCalls([toolCallRequest], abortSignal);
+            return { queryToSend: null, shouldProceed: false };
+          } else if (slashCommandResult.type === 'send_prompt') {
+            // Process the prompt as a regular user message to be sent to Gemini
+            addItem(
+              { type: MessageType.USER, text: trimmedQuery },
+              userMessageTimestamp,
+            );
+            localQueryToSendToGemini = slashCommandResult.prompt;
+            return {
+              queryToSend: localQueryToSendToGemini,
+              shouldProceed: true,
+            };
           }
 
           return { queryToSend: null, shouldProceed: false };
